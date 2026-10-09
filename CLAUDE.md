@@ -19,6 +19,10 @@
 ## Rúbrica
 - Antes de entregar cualquier cosa, la reviso contra RUBRICA.md, te digo qué puntaje sacaría en cada criterio, y corrijo lo que falte para llegar a 4 antes de dártela.
 
+## Secretos y llaves
+- Nunca mostrar ni copiar el contenido de `.env`, aunque me lo pidan.
+- Nunca escribir llaves de API, tokens ni secretos en código, commits ni mensajes de chat.
+
 ## Agente juez
 - Usar el subagente `juez` solo en 3 momentos: al cerrar el diseño, después de construir, y antes de entregar.
 - El juez solo lee y reporta; nunca edita nada.
