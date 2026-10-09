@@ -16,7 +16,7 @@ Patrones para controlar el gasto en LLM. El modelo lo eliges tú en `.env`; el c
 OPENROUTER_API_KEY=sk-or-...
 OPENROUTER_MODEL=<modelo para tareas complejas>        # lo eliges tú con el brief
 OPENROUTER_MODEL_CHEAP=<modelo para tareas simples>    # opcional; si no se define, usa OPENROUTER_MODEL para todo
-OPENROUTER_BUDGET_USD=5.00                             # tope total del evento (US$5 bloqueados para debrief)
+OPENROUTER_BUDGET_USD=35.00                            # llave del evento: US$50 total, US$5 bloqueados para debrief, US$45 usables → sugiere 35 para dejar margen
 ```
 
 > **Cómo elegir el modelo:** cuando tengas el brief, busca en openrouter.ai/models los precios del día, compara calidad/costo, y escribe el nombre exacto en `.env`. No hay precios hardcodeados aquí porque cambian.
@@ -99,7 +99,7 @@ class CostTracker:
 
     @classmethod
     def from_env(cls) -> "CostTracker":
-        return cls(budget_usd=float(os.environ.get("OPENROUTER_BUDGET_USD", "5.0")))
+        return cls(budget_usd=float(os.environ.get("OPENROUTER_BUDGET_USD", "35.0")))
 
     def add(self, record: CostRecord) -> "CostTracker":
         return CostTracker(budget_usd=self.budget_usd, records=(*self.records, record))
