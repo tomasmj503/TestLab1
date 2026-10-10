@@ -16,8 +16,11 @@ Patrones para controlar el gasto en LLM. El modelo lo eliges tú en `.env`; el c
 OPENROUTER_API_KEY=sk-or-...
 OPENROUTER_MODEL=<modelo para tareas complejas>        # lo eliges tú con el brief
 OPENROUTER_MODEL_CHEAP=<modelo para tareas simples>    # opcional; si no se define, usa OPENROUTER_MODEL para todo
-OPENROUTER_BUDGET_USD=35.00                            # llave del evento: US$50 total, US$5 bloqueados para debrief, US$45 usables → sugiere 35 para dejar margen
+OPENROUTER_BUDGET_USD=<tope en USD>                    # OBLIGATORIA, sin valor por defecto; si falta, la API no arranca
+# Ejemplo (no es un valor por defecto):  OPENROUTER_BUDGET_USD=35.00
 ```
+
+> **Cómo fijar el tope:** sale de las reglas del evento (saldo de la llave y reservas, ver `RUBRICA.md` / `BRIEF.md`). Pon un número menor al saldo usable para dejar margen.
 
 > **Cómo elegir el modelo:** cuando tengas el brief, busca en openrouter.ai/models los precios del día, compara calidad/costo, y escribe el nombre exacto en `.env`. No hay precios hardcodeados aquí porque cambian.
 
@@ -99,7 +102,24 @@ class CostTracker:
 
     @classmethod
     def from_env(cls) -> "CostTracker":
-        return cls(budget_usd=float(os.environ.get("OPENROUTER_BUDGET_USD", "35.0")))
+        """Lee el tope de .env. No hay valor por defecto: si falta o es inválido, falla."""
+        raw = os.environ.get("OPENROUTER_BUDGET_USD", "").strip()
+        if not raw:
+            raise RuntimeError(
+                "Falta OPENROUTER_BUDGET_USD en .env: define el tope de gasto en USD "
+                "(por ejemplo OPENROUTER_BUDGET_USD=35.00). No hay valor por defecto."
+            )
+        try:
+            budget = float(raw)
+        except ValueError:
+            raise RuntimeError(
+                f"OPENROUTER_BUDGET_USD debe ser un número en USD, pero vale {raw!r}."
+            ) from None
+        if not 0 < budget < float("inf"):
+            raise RuntimeError(
+                f"OPENROUTER_BUDGET_USD debe ser mayor que 0 y finito, pero vale {raw!r}."
+            )
+        return cls(budget_usd=budget)
 
     def add(self, record: CostRecord) -> "CostTracker":
         return CostTracker(budget_usd=self.budget_usd, records=(*self.records, record))
@@ -265,7 +285,7 @@ Si el resultado es ≤ 0, no llames más a modelos. Si la consulta falla, no blo
 ## Buenas prácticas
 
 - **Elige el modelo con el brief en mano**: compara calidad necesaria vs precio del día en openrouter.ai/models.
-- **Establece el tope antes de procesar**: `CostTracker.from_env()` lo lee de `.env`.
+- **Establece el tope antes de procesar**: `CostTracker.from_env()` lo lee de `.env` y falla con un mensaje claro si falta; nunca asumas un valor.
 - **Consulta el saldo real a OpenRouter** (`GET /api/v1/key`) al arrancar y antes de tandas grandes; el contador en memoria se pierde al reiniciar.
 - **Loguea cada selección de modelo**: ayuda a ajustar umbrales con datos reales.
 - **Usa caché** para system prompts que se repiten en muchas llamadas.
@@ -274,6 +294,7 @@ Si el resultado es ≤ 0, no llames más a modelos. Si la consulta falla, no blo
 ## Anti-patrones
 
 - Hardcodear nombres de modelo en el código — van en `.env`.
+- Poner un valor por defecto al tope de gasto: un número olvidado en el código se vuelve el límite real sin que nadie lo decida.
 - Calcular el costo a mano con precios fijos — usar `usage.cost` de la respuesta.
 - Reintentar todos los errores — solo los transitorios.
 - Ignorar `over_budget` antes de cada llamada.
