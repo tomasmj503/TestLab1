@@ -111,6 +111,7 @@ Esta fase **no trae casos escritos**: se leen del `DISENO.md` actual, sea cual s
 Reglas para traducir cada fila:
 - **No inventar ni quitar casos, ni copiar valores de memoria**: todo sale de la fila de `DISENO.md` y del contrato de `BRIEF.md`.
 - `expect_http`: el que diga la fila; si no lo dice, el que fije el contrato del brief para ese tipo de resultado. Si no se puede saber, preguntar al usuario.
+- `expect_body`: basta que cada clave esperada exista con ese valor (el cuerpo real puede traer más campos). Pero un `{}` esperado exige `{}` exacto: si la fila dice `answer: {}`, escribir `"answer": {}` y el corredor fallará si llega cualquier dato ahí. Sin `expect_body`, el cuerpo no se compara.
 - Token válido: `"$TOKEN"` (el corredor lo toma de la variable de entorno `EVAL_TOKEN`). Token incorrecto: un valor falso cualquiera. Sin token: omitir la cabecera.
 - JSON roto o campo faltante: usar `raw_body` o un `body` incompleto, según la fila.
 - Si la fila aún dice "por medir" o no tiene valor esperado, ese caso **no se puede verificar**: reportarlo como NO VERIFICABLE, nunca como correcto.

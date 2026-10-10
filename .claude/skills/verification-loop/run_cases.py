@@ -14,8 +14,10 @@ Cada línea de CASOS.jsonl es un objeto JSON con:
     body         objeto JSON a enviar (opcional)
     raw_body     texto a enviar tal cual, para probar JSON roto (opcional)
     expect_http  código HTTP esperado (200, 400, 401...)
-    expect_body  cuerpo esperado: cada clave indicada debe existir con ese
-                 valor; el cuerpo real puede traer campos extra
+    expect_body  cuerpo esperado (opcional; si falta, el cuerpo no se compara):
+                 cada clave indicada debe existir con ese valor y el cuerpo
+                 real puede traer campos extra. Excepción: un objeto vacío {}
+                 (en cualquier nivel) exige un {} exacto, sin datos dentro.
 
 Sale con código 1 si algún caso falla, 2 si faltan datos para correr.
 """
@@ -31,8 +33,13 @@ REQUEST_TIMEOUT_S = 35  # un poco sobre el límite típico de 30 s, para poder m
 
 
 def contains(expected, actual):
-    """True si todo lo esperado aparece en lo recibido (objetos: por clave)."""
+    """True si todo lo esperado aparece en lo recibido (objetos: por clave).
+
+    Un objeto vacío esperado ({}) exige que lo recibido sea exactamente {}.
+    """
     if isinstance(expected, dict):
+        if not expected:
+            return actual == {}
         return isinstance(actual, dict) and all(
             key in actual and contains(value, actual[key]) for key, value in expected.items()
         )
@@ -108,12 +115,13 @@ def main():
         passed = 0
         for case in cases:
             code, body, seconds = call(base, case, token)
-            expected_body = case.get("expect_body", {})
+            has_expected_body = "expect_body" in case
+            expected_body = case.get("expect_body")
 
             reasons = []
             if code != case["expect_http"]:
                 reasons.append("código HTTP distinto")
-            if not contains(expected_body, body):
+            if has_expected_body and not contains(expected_body, body):
                 reasons.append("cuerpo distinto")
             if args.max_seconds is not None and seconds > args.max_seconds:
                 reasons.append(f"tardó más de {args.max_seconds:g} s")
@@ -125,7 +133,7 @@ def main():
                 f"  {seconds:.2f}s" + (f"  <- {', '.join(reasons)}" if reasons else "")
             )
             print(f"       recibido: {short(body)}")
-            print(f"       esperado: {short(expected_body) if expected_body else '(sin cuerpo esperado)'}")
+            print(f"       esperado: {short(expected_body) if has_expected_body else '(sin cuerpo esperado)'}")
 
         print(f"--- {base}: {passed}/{len(cases)} casos correctos")
         any_failure = any_failure or passed != len(cases)
