@@ -35,7 +35,13 @@ Extraer precio, stock y conteos de books.toscrape.com respondiendo en < 30 s via
 - **Caché persistente entre reinicios**: no es necesario para un evento de un día; simplificar reduce errores.
 
 ## Huecos conocidos
-- **Errores de tipeo en títulos dan `not_found`.** La normalización (D2) solo cubre mayúsculas, tildes, puntuación y espacios de más. Si el título trae una letra cambiada o faltante, o está recortado, no se encuentra aunque el libro exista, y la respuesta es `status: "not_found"`. Es un límite aceptado por ahora; si el set oculto lo exige, la opción es sumar comparación aproximada sin IA (decisión pendiente).
+Los tipeos y recortes de títulos ya se resuelven (D2). Lo que sigue sin resolverse:
+
+- **Falso positivo conocido: un título inventado muy parecido a uno real devuelve ese libro.** Medido: `"gone cannie shapiro 1"` devuelve `"Good in Bed (Cannie Shapiro #1)"` (parecido 0.857, justo sobre el mínimo de 0.85). También en la muestra de 159 títulos inventados: `"batman hero omnibus volume 1"` → `"I am a Hero Omnibus Volume 1"` (error claro) y `"m carrie"` → `"Carrie"`. Hay una prueba que lo documenta (`test_known_false_positive_gone_cannie_shapiro`). Subir el mínimo lo evitaría, pero perdería tipeos legítimos.
+- **Las pruebas de tipeo son sintéticas.** 0.85 y 0.03 se calibraron con alteraciones generadas por nosotros, no con el set oculto. Errores de otra forma (palabras en otro orden, abreviaturas, palabras faltantes) no están cubiertos y darían `not_found`.
+- **Tipeos en títulos de una sola palabra dan `not_found`** (ej. `"meditatins"` por "Meditations"): lo causa la regla de seguridad de la palabra suelta. 16 de las 1441 consultas alteradas.
+- **Una palabra suelta sin "..." no se completa** (`"Sharp"` → `not_found`), aunque sea el único libro que empieza así. Es una elección a favor de no adivinar.
+- **Categorías:** solo coincidencia exacta normalizada, sin tolerancia a tipeos. No se midió el efecto de agregarla.
 
 ---
 
@@ -80,9 +86,33 @@ Organizadores
 - Descartado: **Agente de IA que navega**. Un modelo de lenguaje decide qué clicar y leer. Útil cuando el sitio cambia impredeciblemente o la lógica es muy compleja; aquí la estructura es fija y conocida. Añade costo en tokens y latencia extra por paso (estimado, por medir: ~2-10 s por acción). Lo usaríamos si hubiera que interpretar texto ambiguo o tomar decisiones no programables.
 
 ### D2 — Cómo comparar títulos y categorías
-**Elegida: normalización (minúsculas + quitar tildes, puntuación y espacios extra).**
-- Descartada: **comparación exacta**. Falla ante cualquier variación de escritura; el brief lo advierte explícitamente.
-- Descartada: **IA para comparar**. Maneja casos más complejos pero añade costo y latencia innecesarios cuando la normalización ya resuelve el problema. Medimos si es suficiente con los 14 casos de prueba propios (ver abajo); si alguno falla por variación no cubierta, añadimos regla específica.
+**Elegida (títulos): normalización + inicio único + parecido de letras con salvaguardas, sin IA. Categorías: solo normalización (minúsculas + quitar tildes, puntuación y espacios extra).**
+
+El título se busca en este orden y se detiene en el primer paso que decide:
+1. **Exacto tras normalizar.**
+2. **Inicio único:** si el texto termina en "..." o tiene 2 palabras o más, y exactamente un título empieza así, es ese. Si el inicio lo comparten varios libros → `not_found` (no adivina). **Regla de seguridad:** una palabra suelta sin "..." que no sea un título exacto → `not_found` ("Sharp" no devuelve "Sharp Objects"; "Sharp ..." sí).
+3. **Parecido de letras** (`difflib`, librería estándar), solo para consultas de 8 letras o más: se acepta si el parecido es **≥ 0.85** y le saca **≥ 0.03** de ventaja al segundo mejor. Si dos libros casi empatan (series como "Saga, Volume 3" y "Volume 5") → `not_found`.
+
+Descartadas:
+- **Comparación exacta**. Falla ante cualquier variación de escritura; el brief lo advierte explícitamente.
+- **IA para comparar**. Se reconsideró el 2026-10-09 como "último recurso" cuando el parecido de letras no decide, y se descartó de nuevo: gasta del presupuesto (US$50, US$5 bloqueados), suma latencia (estimado: ~2-10 s por caso), no es determinista, y su riesgo de equivocarse no se midió. Los 3 pasos de arriba resuelven los casos de prueba con `cost_usd = 0`.
+- **Solo inicio único, sin parecido de letras** (opción A). Más simple y sin números que calibrar, pero no corrige tipeos: I03 e I04 fallaban y 1194 de 1441 consultas alteradas quedaban en `not_found`.
+
+**Cómo se eligieron 0.85 y 0.03 (medido el 2026-10-09 sobre el catálogo real, 999 títulos, con la función entregada):**
+
+| Caso | Entrada | Esperado | Resultado (local) |
+|---|---|---|---|
+| I01 | "A Light in the ..." | £51.77, stock 22 | OK |
+| I02 | "Sapiens: A Brief History ..." | £54.23, stock 20 | OK |
+| I03 | "Sharp Objcts" (tipeo) | £47.82, stock 20 | OK |
+| I04 | "Its Only the Himalyas" (tipeo) | £45.17, stock 19 | OK |
+| I05 | "The ..." (ambiguo) | `not_found` | OK |
+| I06 | "Libro que no existe" | `not_found` | OK |
+
+- 1441 consultas alteradas sobre 300 títulos reales (letra de menos, equivocada, cambiada de lugar, recorte con "..."): **1391 correctas / 0 con libro equivocado / 50 `not_found`** (96.5 %). 1.4 ms por consulta.
+- Series parecidas (22 títulos, 194 consultas con tipeo): **192 correctas / 0 equivocadas / 2 `not_found`**. Un volumen que no existe ("Fruits Basket, Vol. 8") da `not_found`, no el 7 ni el 9.
+- **Los tipeos de prueba son sintéticos:** los generé yo con las 4 alteraciones de arriba. Los del set oculto pueden ser de otra forma (palabras faltantes, en otro orden, abreviaturas) y no se midieron.
+- Con margen 0.08 en vez de 0.03 las series daban solo 65 de 194 (el resto `not_found`): más prudente, pero pierde aciertos.
 
 ### D3 — Cuándo cargar el catálogo
 **Elegida: pre-cargar al arrancar el servidor (no al primer request).**

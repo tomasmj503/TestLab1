@@ -121,6 +121,25 @@ def test_precio_libro_ok_reads_book_page(client, monkeypatch):
     assert len(seen) == 1  # una sola petición a la página del libro
 
 
+def test_precio_libro_with_typo_finds_the_book(client, monkeypatch):
+    monkeypatch.setattr(scraper, "fetch_book_detail", lambda url: BookDetail(Decimal("23.21"), 7))
+    body = run(client, "precio_libro", {"title": "The Road to Litle Dribbling"}).json()
+    assert body["status"] == "ok"
+    assert body["answer"] == {"price_gbp": 23.21, "stock": 7}
+
+
+def test_precio_libro_truncated_title_finds_the_book(client, monkeypatch):
+    monkeypatch.setattr(scraper, "fetch_book_detail", lambda url: BookDetail(Decimal("23.21"), 7))
+    body = run(client, "precio_libro", {"title": "The Road to Little ..."}).json()
+    assert body["status"] == "ok"
+
+
+def test_precio_libro_bare_word_that_is_not_a_title_is_not_found(client):
+    body = run(client, "precio_libro", {"title": "Vagabondin"}).json()  # una palabra, sin "...", no exacta
+    assert body["status"] == "not_found"
+    assert body["answer"] == {}
+
+
 def test_precio_libro_not_found_does_not_touch_the_web(client, monkeypatch):
     def boom(url: str) -> BookDetail:
         raise AssertionError("no debía pedir ninguna página")

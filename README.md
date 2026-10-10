@@ -12,6 +12,7 @@ cuántos libros de una categoría cuestan hasta cierto precio, el libro más bar
 2. **Cada 10 minutos** lo recarga sola. `POST /reload` lo fuerza a mano. Si una recarga falla, se queda con el catálogo anterior.
 3. **Cada pregunta** se contesta desde la memoria. Solo `precio_libro` hace 1 petición a la página del libro (el stock exacto solo está ahí).
 4. Los títulos y categorías se comparan normalizados (sin mayúsculas, tildes ni puntuación): `its only the himalayas` encuentra `It's Only the Himalayas`.
+   Los títulos además toleran recortes y tipeos, sin IA: `A Light in the ...` encuentra `A Light in the Attic` (si solo un libro empieza así) y `Sharp Objcts` encuentra `Sharp Objects` (por parecido de letras, con salvaguardas para no confundir libros de una misma serie). Detalle y números en D2 de DISENO.md.
 5. No usa IA: `cost_usd` es siempre `0`.
 
 ## Rutas
@@ -52,7 +53,7 @@ curl -X POST http://localhost:8000/run \
 ## Pruebas
 
 ```bash
-.venv/bin/pytest -q          # 67 pruebas, sin internet
+.venv/bin/pytest -q          # 92 pruebas, sin internet
 .venv/bin/ruff check .       # estilo
 .venv/bin/pyright            # tipos
 ```
@@ -71,14 +72,17 @@ La imagen escucha en `0.0.0.0:8000`. El token se pasa al arrancar; no queda dent
 
 ## Resultados medidos (2026-10-09, API local contra el sitio real)
 
-- Casos de DISENO.md: **14/14**.
-- Precarga del catálogo: **3.8 s** (999 libros únicos, 50 categorías).
+- Casos de DISENO.md: **14/14**, más los 6 casos I01–I06 de títulos recortados y con tipeos: **20/20** en total.
+- Títulos con errores (1441 consultas sintéticas sobre el catálogo real): 1391 correctas, 0 con libro equivocado, 50 `not_found`.
+- Precarga del catálogo: **3.8 s y 4.5 s** en dos arranques (999 libros únicos, 50 categorías).
 - Tiempo por caso: `precio_libro` ≈ 0.4 s (1 petición al sitio); `contar_categoria` y `mas_barato` < 0.01 s (memoria).
 - `POST /reload`: 4.0 s.
 
 ## Límites conocidos
 
-- **Errores de tipeo** en un título (letras cambiadas o faltantes) no se encuentran: la normalización solo cubre mayúsculas, tildes, puntuación y espacios. Daría `not_found`.
+- **Títulos inventados muy parecidos a uno real** pueden devolver ese libro (ej. `gone cannie shapiro 1` devuelve `Good in Bed (Cannie Shapiro #1)`).
+- **Tipeos de otra forma** (palabras en otro orden, abreviaturas, palabras faltantes) y **tipeos en títulos de una sola palabra** dan `not_found`. Los tipeos con los que se calibró son sintéticos, no los del set oculto.
+- **Una palabra suelta sin "..."** (`Sharp`) no se completa: da `not_found`.
 - **Título repetido en el sitio** ("The Star-Touched Queen" aparece 2 veces): se devuelve el primero y queda un aviso en el registro.
 - **Si el sitio cambia su HTML**, las lecturas fallan y la API responde `status: "error"` (no se cae); el catálogo anterior sigue en memoria hasta que una recarga funcione.
 - **Imagen Docker**: el `Dockerfile` está escrito pero no se pudo construir ni probar en la máquina de desarrollo (Docker apagado).

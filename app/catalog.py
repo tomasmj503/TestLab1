@@ -1,4 +1,5 @@
 """Catálogo en memoria: se precarga entero y se consulta sin tocar la web."""
+import difflib
 import logging
 import re
 import threading
@@ -14,6 +15,12 @@ from app.scraper import ListedBook, ScrapeError
 log = logging.getLogger("catalog")
 
 LOAD_WORKERS = 8  # categorías que se descargan a la vez durante la precarga
+
+# Emparejado aproximado de títulos (D2 de DISENO.md). Valores elegidos midiendo sobre el catálogo real.
+FUZZY_MIN_SCORE = 0.85  # parecido mínimo de letras (0 a 1) para aceptar un título con tipeos
+FUZZY_MIN_MARGIN = 0.03  # ventaja mínima sobre el segundo mejor; si dos libros casi empatan => not_found
+FUZZY_MIN_CHARS = 8  # consultas más cortas no se comparan por parecido: serían demasiado ambiguas
+_TRUNCATION_MARKS = ("...", "…")  # cómo el sitio muestra un título recortado
 
 _APOSTROPHES = re.compile("['’‘`´]")
 _NOT_WORD = re.compile(r"[\W_]+")
@@ -44,7 +51,51 @@ class Catalog:
     load_seconds: float = 0.0
 
     def find_book(self, title: str) -> ListedBook | None:
-        return self.books.get(normalize(title))
+        """Busca un libro por título, de lo más seguro a lo más flexible.
+
+        1. Exacto tras normalizar.
+        2. Inicio único: "A Light in the ..." -> "A Light in the Attic". Solo si el texto termina en
+           "..." o tiene 2 palabras o más; una palabra suelta ("Sharp") es demasiado ambigua.
+           Si el inicio lo comparten varios libros, responde None (no adivina).
+        3. Parecido de letras, para tipeos: exige puntaje mínimo y ventaja sobre el segundo mejor.
+        """
+        key = normalize(title)
+        if not key:
+            return None
+        if key in self.books:
+            return self.books[key]
+
+        truncated = title.rstrip().endswith(_TRUNCATION_MARKS)
+        if not truncated and len(key.split()) < 2:
+            return None
+
+        starts = [candidate for candidate in self.books if candidate.startswith(key + " ")]
+        if len(starts) == 1:
+            return self.books[starts[0]]
+        if starts or len(key) < FUZZY_MIN_CHARS:
+            return None  # inicio compartido por varios libros, o consulta demasiado corta
+
+        return self._closest(key)
+
+    def _closest(self, key: str) -> ListedBook | None:
+        floor = FUZZY_MIN_SCORE - FUZZY_MIN_MARGIN  # por debajo de esto no puede afectar la decisión
+        matcher = difflib.SequenceMatcher(autojunk=False)
+        matcher.set_seq2(key)
+        best_key: str | None = None
+        best = second = 0.0
+        for candidate in self.books:
+            matcher.set_seq1(candidate)
+            if matcher.real_quick_ratio() < floor or matcher.quick_ratio() < floor:
+                continue  # descarte rápido: estos dos cálculos son cotas superiores baratas
+            score = matcher.ratio()
+            if score > best:
+                best_key, best, second = candidate, score, best
+            elif score > second:
+                second = score
+        if best_key is None or best < FUZZY_MIN_SCORE or best - second < FUZZY_MIN_MARGIN:
+            return None
+        log.info("título aproximado: %r -> %r (parecido %.2f, ventaja %.2f)", key, best_key, best, best - second)
+        return self.books[best_key]
 
     def find_category(self, name: str) -> Category | None:
         return self.categories.get(normalize(name))
