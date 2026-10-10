@@ -1,14 +1,35 @@
 ---
 name: verification-loop
-description: Six-phase verification for Python projects — lint, types, tests, security, diff review, and API contract tests against DISENO.md cases. Run after completing a feature, before creating a PR, and always before git push.
+description: Seven-step verification for Python projects — tool check, lint, types, tests, security (secret scan over every repo file), diff review, and API contract tests read from the current DISENO.md, run against both the local and the public URL. Run after completing a feature, before creating a PR, and always before git push.
 license: MIT
 metadata:
-  origin: ECC (adapted for Python + FastAPI + hackathon contract tests)
+  origin: ECC (adapted for Python + FastAPI + hackathon contract tests; cases come from DISENO.md, never hardcoded here)
 ---
 
 # Verification Loop
 
 Run all phases in order. Stop and fix before continuing if a phase fails.
+
+## Phase 0: Herramientas
+
+```bash
+for t in ruff pyright pytest; do command -v "$t" >/dev/null && echo "✓ $t" || echo "✗ $t NO instalado"; done
+```
+
+Si falta alguna, instalarla antes de seguir (no saltarse la fase):
+
+```bash
+# Recomendado: dentro del entorno virtual del proyecto
+python3 -m venv .venv && source .venv/bin/activate
+pip install ruff pyright pytest
+
+# Alternativa en macOS (instalación global)
+brew install ruff pyright
+```
+
+- `ruff` revisa estilo y errores de lógica; `pyright` revisa tipos; `pytest` corre las pruebas.
+- El paquete `pyright` de pip descarga Node.js la primera vez que se ejecuta: necesita internet y esa primera corrida es más lenta.
+- Confirmar que `.venv/` está en `.gitignore` antes de hacer commit.
 
 ## Phase 1: Lint
 
@@ -42,11 +63,16 @@ Target: 0 failures before push.
 
 ## Phase 4: Security — OBLIGATORIO antes de cada push
 
+Busca secretos en **todos** los archivos del repo (código, `.md`, `.yml`, `.json`, `.txt`, Dockerfile…), tanto los rastreados por git como los nuevos sin rastrear. Los archivos ignorados por `.gitignore` (como `.env`) no se escanean, que es lo correcto.
+
 ```bash
-# Secretos sueltos en código fuente
-grep -rn "OPENROUTER_API_KEY\s*=" --include="*.py" . | grep -v ".env" | grep -v "os.environ" | grep -v "os.getenv"
-grep -rn "X-Eval-Token\s*=" --include="*.py" . | grep -v ".env" | grep -v "os.environ"
-grep -rn "sk-or-" --include="*.py" . 2>/dev/null | head -10
+# -l: muestra SOLO nombres de archivo, nunca el valor del secreto
+FILES=$(git grep -lIiE --untracked \
+  -e "sk-or-[A-Za-z0-9_-]{20,}" \
+  -e "OPENROUTER_API_KEY[[:space:]]*[:=][[:space:]]*[\"']?[A-Za-z0-9_-]{20,}" \
+  -e "X-Eval-Token[\"']?[[:space:]]*[:=][[:space:]]*[\"']?[A-Za-z0-9_-]{8,}" \
+  -e "(api[_-]?key|secret|passw(or)?d|token)[\"']?[[:space:]]*[:=][[:space:]]*[\"'][A-Za-z0-9_/+=.-]{20,}[\"']")
+if [ -n "$FILES" ]; then echo "⚠ ALERTA: posible secreto en:"; echo "$FILES"; else echo "✓ sin secretos en ningún archivo del repo"; fi
 
 # Verificar que .env NO está rastreado por git
 git ls-files --error-unmatch .env 2>&1 | grep -q "did not match" && echo "✓ .env no está en git" || echo "⚠ ALERTA: .env está en git — quítalo antes de push"
@@ -55,7 +81,7 @@ git ls-files --error-unmatch .env 2>&1 | grep -q "did not match" && echo "✓ .e
 git diff --cached --name-only | grep "^\.env$" && echo "⚠ ALERTA: .env está en el staging area" || echo "✓ .env no en staging"
 ```
 
-Si algún secreto aparece en código fuente: STOP. No hacer push.
+Si aparece algún archivo: STOP. No hacer push. Abrir el archivo localmente para decidir si es un secreto real o un falso positivo (por ejemplo un valor de ejemplo). **Nunca pegar el valor en el chat ni en un commit.**
 
 ## Phase 5: Diff review
 
@@ -69,75 +95,57 @@ Revisar cada archivo cambiado:
 - ¿Falta manejo de errores donde el brief lo exige?
 - ¿Aparece algún secreto o valor hardcodeado?
 
-## Phase 6: Contract tests — casos del diseño
+## Phase 6: Contract tests — casos del DISENO.md vigente
 
-Con el servidor corriendo localmente (`uvicorn app.main:app --port 8000`), ejecutar los casos de DISENO.md y verificar que cada respuesta coincide con el resultado esperado medido.
+Esta fase **no trae casos escritos**: se leen del `DISENO.md` actual, sea cual sea el reto. Si el reto cambia, cambian los casos sin tocar esta skill.
 
-Casos mínimos antes de entregar (T01–T14):
+### 6.1 Armar el archivo de casos
 
-```bash
-BASE="http://localhost:8000"
-TOKEN="<token-de-prueba>"
+1. Abrir `DISENO.md` y ubicar la tabla o lista de casos de prueba (suele llamarse "Plan de medición"). Abrir también `BRIEF.md` para la forma exacta de las peticiones y respuestas.
+2. Escribir **una línea JSON por caso** en un archivo temporal **fuera del repo** (no se commitea). Mismos ids y mismo orden que `DISENO.md`. Formato:
 
-# T01 — libro exacto
-curl -s -X POST $BASE/run -H "X-Eval-Token: $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"case_id":"T01","type":"precio_libro","params":{"title":"It'\''s Only the Himalayas"}}' | python -m json.tool
-
-# T03 — segundo libro distinto (evita valor hardcodeado)
-curl -s -X POST $BASE/run -H "X-Eval-Token: $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"case_id":"T03","type":"precio_libro","params":{"title":"Sharp Objects"}}' | python -m json.tool
-# Esperado: {"price_gbp": 47.82, "stock": 20}
-
-# T06 — borde exacto ≤ (Vagabonding a £36.94 debe incluirse)
-curl -s -X POST $BASE/run -H "X-Eval-Token: $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"case_id":"T06","type":"contar_categoria","params":{"category":"Travel","max_price_gbp":36.94}}' | python -m json.tool
-# Esperado: {"count": 4}
-
-# T08 — count 0 (categoría existe, ningún libro cumple)
-curl -s -X POST $BASE/run -H "X-Eval-Token: $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"case_id":"T08","type":"contar_categoria","params":{"category":"Travel","max_price_gbp":20.00}}' | python -m json.tool
-# Esperado: status "ok", count 0
-
-# T12 — token incorrecto
-curl -s -X POST $BASE/run -H "X-Eval-Token: token-malo" \
-  -H "Content-Type: application/json" \
-  -d '{"case_id":"T12","type":"precio_libro","params":{"title":"Sharp Objects"}}' | python -m json.tool
-# Esperado: HTTP 401, {"error": "unauthorized"}
-
-# T13 — params faltante
-curl -s -X POST $BASE/run -H "X-Eval-Token: $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"case_id":"T13","type":"precio_libro"}' | python -m json.tool
-# Esperado: HTTP 400, {"error": "bad_request"}
-
-# T14 — tipo desconocido
-curl -s -X POST $BASE/run -H "X-Eval-Token: $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"case_id":"T14","type":"tipo_inventado","params":{}}' | python -m json.tool
-# Esperado: HTTP 200, {"status": "error"}
-
-# GET /health
-curl -s $BASE/health
-# Esperado: {"status": "ok"}
+```json
+{"id": "<id del caso>", "method": "POST", "path": "<ruta>", "headers": {"<cabecera de auth>": "$TOKEN"}, "body": {"<según BRIEF.md>": "..."}, "expect_http": 200, "expect_body": {"<según la fila>": "..."}}
 ```
 
-Ver DISENO.md para los 14 casos completos con todos los valores esperados.
+Reglas para traducir cada fila:
+- **No inventar ni quitar casos, ni copiar valores de memoria**: todo sale de la fila de `DISENO.md` y del contrato de `BRIEF.md`.
+- `expect_http`: el que diga la fila; si no lo dice, el que fije el contrato del brief para ese tipo de resultado. Si no se puede saber, preguntar al usuario.
+- Token válido: `"$TOKEN"` (el corredor lo toma de la variable de entorno `EVAL_TOKEN`). Token incorrecto: un valor falso cualquiera. Sin token: omitir la cabecera.
+- JSON roto o campo faltante: usar `raw_body` o un `body` incompleto, según la fila.
+- Si la fila aún dice "por medir" o no tiene valor esperado, ese caso **no se puede verificar**: reportarlo como NO VERIFICABLE, nunca como correcto.
+
+### 6.2 Correr contra la URL local Y la pública
+
+1. Levantar el servidor local con el comando del proyecto (según README; por ejemplo `uvicorn app.main:app --port 8000`).
+2. Tener `EVAL_TOKEN` ya cargado en el entorno de la terminal. No escribir ni mostrar su valor.
+3. La URL pública la da el usuario (o está en README/BRIEF). Si todavía no hay despliegue, correr solo local y reportar **"pública: NO PROBADA"**; no darla por buena.
+
+```bash
+python3 -I .claude/skills/verification-loop/run_cases.py <archivo-de-casos.jsonl> \
+  --base http://localhost:8000 \
+  --base <URL-pública> \
+  --max-seconds <límite por caso del BRIEF.md>
+```
+
+### 6.3 Qué debe mostrar la salida
+
+Para **cada** caso y **cada** URL: código HTTP recibido contra esperado, cuerpo recibido contra esperado, tiempo en segundos y PASS/FAIL. El código HTTP se muestra siempre, también en los casos que pasan (200, 400, 401…).
+
+Si un caso pasa en local y falla en la URL pública, la causa suele estar en el despliegue (proxy HTTPS, variable de entorno distinta, catálogo sin cargar), no en el código.
 
 ## Reporte final
 
 ```
 VERIFICATION REPORT
 ===================
+Tools:     [OK / instaladas ahora: ...]
 Lint:      [PASS/FAIL] (X errores)
 Types:     [PASS/FAIL] (X errores)
 Tests:     [PASS/FAIL] (X/Y pasaron)
-Security:  [PASS/FAIL] (.env fuera de git: sí/no, secretos en código: X)
+Security:  [PASS/FAIL] (archivos con posible secreto: X, .env fuera de git: sí/no)
 Diff:      [X archivos cambiados]
-Contracts: [X/14 casos correctos]
+Contracts: local X/N · pública X/N (o "NO PROBADA") · no verificables: X
 
 Overall: [LISTO / NO LISTO] para push
 ```

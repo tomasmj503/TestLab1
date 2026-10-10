@@ -207,10 +207,66 @@ def process(
 
 ---
 
+## 8. Saldo real: consultarlo a OpenRouter
+
+El `CostTracker` vive en memoria: si la API se reinicia (deploy, caída, `docker restart`), el contador vuelve a cero y "olvida" lo que ya se gastó. La fuente de verdad del saldo es OpenRouter:
+
+```
+GET https://openrouter.ai/api/v1/key
+Authorization: Bearer <OPENROUTER_API_KEY>
+```
+
+Es una consulta de información de la llave, no una llamada a un modelo. Es gratis (lo indica el dueño del proyecto; la documentación de OpenRouter no lo afirma de forma explícita).
+
+Campos útiles dentro de `data` (documentación oficial de OpenRouter):
+
+| Campo | Significado |
+|---|---|
+| `usage` | Créditos gastados con esa llave, desde siempre |
+| `usage_daily` | Gastado en el día UTC actual |
+| `limit` | Tope de la llave; `null` = sin tope |
+| `limit_remaining` | Lo que queda bajo ese tope; `null` = sin tope |
+
+```python
+import requests
+
+def fetch_key_info() -> dict:
+    """Consulta a OpenRouter el estado real de la llave. Lanza excepción si falla."""
+    r = requests.get(
+        "https://openrouter.ai/api/v1/key",
+        headers={"Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}"},
+        timeout=10,
+    )
+    r.raise_for_status()
+    return r.json()["data"]
+
+
+def real_remaining_usd(tracker: CostTracker) -> float:
+    """Lo que de verdad queda: el menor entre el presupuesto propio y el tope de la llave."""
+    try:
+        info = fetch_key_info()
+    except requests.RequestException:
+        return tracker.remaining   # sin red: usa el contador local y deja aviso en el log
+    candidates = [tracker.budget_usd - float(info["usage"])]
+    if info.get("limit_remaining") is not None:
+        candidates.append(float(info["limit_remaining"]))
+    return min(candidates)
+```
+
+Cuándo consultar:
+- **Al arrancar la API**: así conoces el gasto previo aunque el contador esté en cero.
+- **Antes de una tanda grande de llamadas**, o cada cierto número de casos.
+- **No en cada request**: suma latencia y compite con el límite de tiempo por caso.
+
+Si el resultado es ≤ 0, no llames más a modelos. Si la consulta falla, no bloquees el servicio: usa el contador local y registra el aviso.
+
+---
+
 ## Buenas prácticas
 
 - **Elige el modelo con el brief en mano**: compara calidad necesaria vs precio del día en openrouter.ai/models.
 - **Establece el tope antes de procesar**: `CostTracker.from_env()` lo lee de `.env`.
+- **Consulta el saldo real a OpenRouter** (`GET /api/v1/key`) al arrancar y antes de tandas grandes; el contador en memoria se pierde al reiniciar.
 - **Loguea cada selección de modelo**: ayuda a ajustar umbrales con datos reales.
 - **Usa caché** para system prompts que se repiten en muchas llamadas.
 - **Nunca reintentar errores de autenticación**: solo gastarías más presupuesto.
@@ -221,4 +277,5 @@ def process(
 - Calcular el costo a mano con precios fijos — usar `usage.cost` de la respuesta.
 - Reintentar todos los errores — solo los transitorios.
 - Ignorar `over_budget` antes de cada llamada.
+- Confiar solo en el contador en memoria: se borra al reiniciar la API; el saldo real se consulta a OpenRouter.
 - Mutar el CostTracker en vez de crear uno nuevo — dificulta auditar el gasto.
