@@ -5,7 +5,7 @@ Extraer precio, stock y conteos de books.toscrape.com respondiendo en < 30 s via
 
 ## Hallazgos del sitio (observación directa)
 - No hay buscador ni filtros de precio: toda la lógica de filtrado la hace nuestro sistema.
-- Los títulos en la lista salen cortados; el título completo solo está dentro de la página del libro.
+- **Hallazgo (verificado el 2026-10-09 al construir): el título completo sí viene en la lista.** El texto visible sale cortado ("Full Moon over Noah’s ..."), pero el atributo `title` del enlace de cada libro trae el título entero. No hace falta abrir cada libro para conocerlo; así la pre-carga solo recorre páginas de lista.
 - El stock exacto (`In stock (19 available)`) solo aparece dentro de la página del libro, no en la lista.
 - Algunas categorías tienen varias páginas (botón "next"): hay que recorrerlas todas.
 - El carrito no es útil para ningún caso: queda fuera del scope.
@@ -33,6 +33,9 @@ Extraer precio, stock y conteos de books.toscrape.com respondiendo en < 30 s via
 - **Imágenes, reseñas y ratings**: el brief no los pide; añadirlos solo agregaría tiempo de descarga.
 - **Escritura de datos**: solo leemos el sitio, nunca modificamos nada.
 - **Caché persistente entre reinicios**: no es necesario para un evento de un día; simplificar reduce errores.
+
+## Huecos conocidos
+- **Errores de tipeo en títulos dan `not_found`.** La normalización (D2) solo cubre mayúsculas, tildes, puntuación y espacios de más. Si el título trae una letra cambiada o faltante, o está recortado, no se encuentra aunque el libro exista, y la respuesta es `status: "not_found"`. Es un límite aceptado por ahora; si el set oculto lo exige, la opción es sumar comparación aproximada sin IA (decisión pendiente).
 
 ---
 
@@ -65,7 +68,7 @@ Organizadores
   (si Contabo falla → reiniciar contenedor con Docker restart policy)
 ```
 
-**Al arrancar:** recorrer sidebar → por cada categoría, seguir "next" hasta el final → guardar en memoria `{ título_normalizado → url, categoría_normalizada → [libros] }`. Luego ya está listo para responder. Tiempo de pre-carga: estimado, por medir.
+**Al arrancar:** recorrer sidebar → por cada categoría, seguir "next" hasta el final → guardar en memoria `{ título_normalizado → url, categoría_normalizada → [libros] }`. Luego ya está listo para responder. Tiempo de pre-carga: **3.8 s, medido** (2026-10-09; 999 libros únicos, 50 categorías, 8 categorías en paralelo).
 
 ---
 
@@ -79,7 +82,7 @@ Organizadores
 ### D2 — Cómo comparar títulos y categorías
 **Elegida: normalización (minúsculas + quitar tildes, puntuación y espacios extra).**
 - Descartada: **comparación exacta**. Falla ante cualquier variación de escritura; el brief lo advierte explícitamente.
-- Descartada: **IA para comparar**. Maneja casos más complejos pero añade costo y latencia innecesarios cuando la normalización ya resuelve el problema. Medimos si es suficiente con los 10 casos de prueba propios (ver abajo); si alguno falla por variación no cubierta, añadimos regla específica.
+- Descartada: **IA para comparar**. Maneja casos más complejos pero añade costo y latencia innecesarios cuando la normalización ya resuelve el problema. Medimos si es suficiente con los 14 casos de prueba propios (ver abajo); si alguno falla por variación no cubierta, añadimos regla específica.
 
 ### D3 — Cuándo cargar el catálogo
 **Elegida: pre-cargar al arrancar el servidor (no al primer request).**
@@ -116,5 +119,5 @@ Organizadores
 
 **Métricas contables:**
 - Aciertos: X / 14 (meta: 14/14 antes de entregar)
-- Tiempo por caso: medir cada uno individualmente (meta: < 5 s estimado, por medir; límite duro: 30 s)
+- Tiempo por caso: medir cada uno individualmente (meta: < 5 s; límite duro: 30 s). **Medido el 2026-10-09 en local: máximo 0.41 s** (`precio_libro`, que hace 1 request al sitio); el resto < 0.01 s.
 - `cost_usd` por caso: 0.00 (sin IA en scraping; si se añade IA en algún paso, medir por separado)
