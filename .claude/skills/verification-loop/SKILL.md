@@ -70,7 +70,6 @@ Busca secretos en **todos** los archivos del repo (código, `.md`, `.yml`, `.jso
 FILES=$(git grep -lIiE --untracked \
   -e "sk-or-[A-Za-z0-9_-]{20,}" \
   -e "OPENROUTER_API_KEY[[:space:]]*[:=][[:space:]]*[\"']?[A-Za-z0-9_-]{20,}" \
-  -e "X-Eval-Token[\"']?[[:space:]]*[:=][[:space:]]*[\"']?[A-Za-z0-9_-]{8,}" \
   -e "(api[_-]?key|secret|passw(or)?d|token)[\"']?[[:space:]]*[:=][[:space:]]*[\"'][A-Za-z0-9_/+=.-]{20,}[\"']")
 if [ -n "$FILES" ]; then echo "⚠ ALERTA: posible secreto en:"; echo "$FILES"; else echo "✓ sin secretos en ningún archivo del repo"; fi
 
@@ -80,6 +79,8 @@ git ls-files --error-unmatch .env 2>&1 | grep -q "did not match" && echo "✓ .e
 # .env no debe aparecer en el diff del commit
 git diff --cached --name-only | grep "^\.env$" && echo "⚠ ALERTA: .env está en el staging area" || echo "✓ .env no en staging"
 ```
+
+Los patrones no incluyen nombres de cabeceras propias de un reto; el último patrón cubre cualquier `token`/`secret`/`api_key` asignado a un valor largo. Si el brief define una cabecera de autenticación con nombre propio y su valor aparece escrito en un archivo, añadir un `-e` con ese nombre (tomado de `BRIEF.md`).
 
 Si aparece algún archivo: STOP. No hacer push. Abrir el archivo localmente para decidir si es un secreto real o un falso positivo (por ejemplo un valor de ejemplo). **Nunca pegar el valor en el chat ni en un commit.**
 
@@ -110,6 +111,7 @@ Esta fase **no trae casos escritos**: se leen del `DISENO.md` actual, sea cual s
 
 Reglas para traducir cada fila:
 - **No inventar ni quitar casos, ni copiar valores de memoria**: todo sale de la fila de `DISENO.md` y del contrato de `BRIEF.md`.
+- **El nombre de la cabecera de autenticación, las rutas, los formatos y el límite de tiempo salen siempre de `BRIEF.md`**. Esta skill no fija ninguno; si el brief no los define, preguntar al usuario.
 - `expect_http`: el que diga la fila; si no lo dice, el que fije el contrato del brief para ese tipo de resultado. Si no se puede saber, preguntar al usuario.
 - `expect_body`: basta que cada clave esperada exista con ese valor (el cuerpo real puede traer más campos). Pero un `{}` esperado exige `{}` exacto: si la fila dice `answer: {}`, escribir `"answer": {}` y el corredor fallará si llega cualquier dato ahí. Sin `expect_body`, el cuerpo no se compara.
 - Token válido: `"$TOKEN"` (el corredor lo toma de la variable de entorno `EVAL_TOKEN`). Token incorrecto: un valor falso cualquiera. Sin token: omitir la cabecera.
@@ -128,6 +130,8 @@ python3 -I .claude/skills/verification-loop/run_cases.py <archivo-de-casos.jsonl
   --base <URL-pública> \
   --max-seconds <límite por caso del BRIEF.md>
 ```
+
+`--max-seconds` viene del `BRIEF.md`. Un caso que tarde más se marca FAIL, y cada petición espera como máximo ese valor + 5 s. Si el brief no fija límite, omitir la opción: cada petición espera hasta 120 s y el tiempo solo se muestra, no se juzga.
 
 ### 6.3 Qué debe mostrar la salida
 

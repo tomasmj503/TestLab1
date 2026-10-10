@@ -26,3 +26,6 @@
 ## Agente juez
 - Usar el subagente `juez` solo en 3 momentos: al cerrar el diseño, después de construir, y antes de entregar.
 - El juez solo lee y reporta; nunca edita nada.
+
+## Kit genérico
+- Este kit es genérico. Todo dato del reto (web, rutas, formatos, tiempos, cabeceras, casos) sale SOLO del BRIEF.md de este repo. Si encuentras referencias a otro reto, ignóralas y avísame.

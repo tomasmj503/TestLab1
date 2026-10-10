@@ -3,7 +3,10 @@
 
 Uso:
     python3 -I run_cases.py CASOS.jsonl --base http://localhost:8000 \
-        --base https://url-publica.example.com --max-seconds 30
+        --base https://url-publica.example.com --max-seconds <límite del BRIEF.md>
+
+--max-seconds: un caso que tarde más se marca FAIL. Cada petición espera como
+máximo --max-seconds + 5 s; si no se pasa, espera hasta 120 s y no mide tiempo.
 
 Cada línea de CASOS.jsonl es un objeto JSON con:
     id           nombre del caso (el mismo de DISENO.md)
@@ -29,7 +32,13 @@ import time
 import urllib.error
 import urllib.request
 
-REQUEST_TIMEOUT_S = 35  # un poco sobre el límite típico de 30 s, para poder medirlo
+DEFAULT_WAIT_S = 120  # espera máxima por petición si no se pasa --max-seconds
+GRACE_S = 5           # margen sobre --max-seconds para poder medir cuánto tardó de verdad
+
+
+def wait_limit(max_seconds):
+    """Cuánto espera cada petición antes de rendirse."""
+    return DEFAULT_WAIT_S if max_seconds is None else max_seconds + GRACE_S
 
 
 def contains(expected, actual):
@@ -51,7 +60,7 @@ def short(value, limit=400):
     return text if len(text) <= limit else text[:limit] + "…"
 
 
-def call(base, case, token):
+def call(base, case, token, timeout):
     """Hace la petición. Devuelve (código_http | None, cuerpo, segundos)."""
     headers = {
         name: (token if value == "$TOKEN" else value)
@@ -73,7 +82,7 @@ def call(base, case, token):
     )
     started = time.perf_counter()
     try:
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_S) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             code, raw = response.status, response.read()
     except urllib.error.HTTPError as error:  # 4xx y 5xx también son respuestas válidas
         code, raw = error.code, error.read()
@@ -109,12 +118,13 @@ def main():
         print("Falta la variable de entorno EVAL_TOKEN (token válido de pruebas).", file=sys.stderr)
         return 2
 
+    timeout = wait_limit(args.max_seconds)
     any_failure = False
     for base in args.base:
         print(f"\n=== {base} ===")
         passed = 0
         for case in cases:
-            code, body, seconds = call(base, case, token)
+            code, body, seconds = call(base, case, token, timeout)
             has_expected_body = "expect_body" in case
             expected_body = case.get("expect_body")
 
