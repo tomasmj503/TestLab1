@@ -70,6 +70,9 @@ docker run -d --restart always -p 8000:8000 -e EVAL_TOKEN=... reto1
 
 La imagen escucha en `0.0.0.0:8000`. El token se pasa al arrancar; no queda dentro de la imagen.
 
+Estado: la imagen se construyó y se ejecutó con Docker en el servidor de despliegue con el commit `bc2d7a3`
+(construcción hecha por el autor; los 20 casos pasan contra la URL pública, ver "Resultados medidos").
+
 ## Resultados medidos (2026-10-09, API local contra el sitio real)
 
 - Casos de DISENO.md: **14/14**, más los 6 casos I01–I06 de títulos recortados y con tipeos: **20/20** en total.
@@ -77,6 +80,9 @@ La imagen escucha en `0.0.0.0:8000`. El token se pasa al arrancar; no queda dent
 - Precarga del catálogo: **3.8 s y 4.5 s** en dos arranques (999 libros únicos, 50 categorías).
 - Tiempo por caso: `precio_libro` ≈ 0.4 s (1 petición al sitio); `contar_categoria` y `mas_barato` < 0.01 s (memoria).
 - `POST /reload`: 4.0 s.
+- **URL pública** (`https://frontier.jutilabs.com`, commit `bc2d7a3`, 2026-10-09): **20/20** casos, incluidos I01–I06.
+  Tiempos medidos desde el cliente: entre 0.29 s y 12.16 s (los casos que no abren el sitio, 0.3-0.7 s típico);
+  el servidor reportó 1-317 ms en todos. Una sola corrida.
 
 ## Límites conocidos
 
@@ -85,4 +91,4 @@ La imagen escucha en `0.0.0.0:8000`. El token se pasa al arrancar; no queda dent
 - **Una palabra suelta sin "..."** (`Sharp`) no se completa: da `not_found`.
 - **Título repetido en el sitio** ("The Star-Touched Queen" aparece 2 veces): se devuelve el primero y queda un aviso en el registro.
 - **Si el sitio cambia su HTML**, las lecturas fallan y la API responde `status: "error"` (no se cae); el catálogo anterior sigue en memoria hasta que una recarga funcione.
-- **Imagen Docker**: el `Dockerfile` está escrito pero no se pudo construir ni probar en la máquina de desarrollo (Docker apagado).
+- **Tiempos por la red pública con picos**: en la corrida pública hubo casos de 2 a 12 s medidos desde el cliente mientras el servidor reportaba menos de 320 ms. El límite de 30 s se cumplió en todos, pero el pico más alto (12.16 s) usa cerca de la mitad del margen y su causa no está identificada.
